@@ -8,6 +8,8 @@ set(CMAKE_CXX_EXTENSIONS OFF)
 add_executable(linking_loader
     main.cpp
     linking_loader.cpp
+    passers.cpp
+    util.cpp
 )
 
 target_compile_options(linking_loader PRIVATE
@@ -15,3 +17,21 @@ target_compile_options(linking_loader PRIVATE
     -Wextra
     -Wpedantic
 )
+
+include(CTest)
+if(BUILD_TESTING)
+    add_executable(test_same_result
+        test/test_same_result.cpp
+    )
+
+    target_compile_options(test_same_result PRIVATE
+        -Wall
+        -Wextra
+        -Wpedantic
+    )
+
+    add_test(
+        NAME compare_python_and_cpp_loader
+        COMMAND test_same_result $<TARGET_FILE:linking_loader> ${CMAKE_SOURCE_DIR}
+    )
+endif()

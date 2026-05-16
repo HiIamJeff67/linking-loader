@@ -7,3 +7,9 @@ CMakeCache.txt
 CMakeFiles/
 cmake_install.cmake
 Makefile
+
+# temp files
+**/_tmp/
+
+# python cache
+**/__pycache__/

@@ -2,6 +2,7 @@
 
 #include <cstdint>
 #include <exception>
+#include <filesystem>
 #include <fstream>
 #include <iomanip>
 #include <iostream>
@@ -10,6 +11,25 @@
 #include <vector>
 
 namespace {
+
+std::uint32_t parse_hex_progaddr(const std::string& text) {
+    std::size_t idx = 0;
+    unsigned long value = 0;
+    try {
+        value = std::stoul(text, &idx, 16);
+    } catch (const std::exception&) {
+        throw std::runtime_error("Failed to parse PROGADDR (hex): " + text);
+    }
+
+    if (idx != text.size()) {
+        throw std::runtime_error("Invalid PROGADDR format (hex): " + text);
+    }
+    if (value > 0xFFFFFFFFUL) {
+        throw std::runtime_error("PROGADDR out of 32-bit range: " + text);
+    }
+
+    return static_cast<std::uint32_t>(value);
+}
 
 std::uint32_t parse_cli_u32(const std::string& text, const char* name) {
     std::size_t idx = 0;
@@ -33,28 +53,59 @@ std::uint32_t parse_cli_u32(const std::string& text, const char* name) {
 
 void print_usage(const char* argv0) {
     std::cerr << "Usage: " << argv0
-              << " <obj1> [obj2 ...] [--load-address 0x1000] [--dump-start 0x1000] [--dump-length 64] [--report output.txt]\n";
+              << " <PROGADDR_HEX> <obj1> [obj2 ...] [--dump-start 0x4000] [--dump-length 256] [--report output.txt]\n";
+}
+
+void ensure_parent_dir(const std::string& path) {
+    const std::filesystem::path p(path);
+    const auto parent = p.parent_path();
+    if (!parent.empty()) {
+        std::filesystem::create_directories(parent);
+    }
+}
+
+void write_report_file(const LinkingLoader& loader,
+                       std::uint32_t dump_start,
+                       std::uint32_t dump_length,
+                       const std::string& report_path) {
+    ensure_parent_dir(report_path);
+
+    std::ofstream report(report_path, std::ios::out | std::ios::trunc);
+    if (!report) {
+        throw std::runtime_error("Cannot write report file: " + report_path);
+    }
+
+    report << "=== ESTAB ===\n";
+    loader.write_estab(report);
+
+    report << "\n=== MEMORY ===\n";
+    loader.write_memory_dump(report, dump_start, dump_length);
 }
 
 }  // namespace
 
 int main(int argc, char* argv[]) {
-    std::vector<std::string> object_files;
-    std::uint32_t load_address = 0x1000;
-    std::uint32_t dump_start = 0x1000;
-    std::uint32_t dump_length = 64;
+    if (argc < 3) {
+        print_usage(argv[0]);
+        return 1;
+    }
+
+    std::uint32_t progaddr = 0;
+    std::uint32_t dump_start = 0;
+    std::uint32_t dump_length = 0;
     std::string report_path = "output.txt";
+    bool report_overridden = false;
+
+    std::vector<std::string> object_files;
 
     try {
-        for (int i = 1; i < argc; ++i) {
+        progaddr = parse_hex_progaddr(argv[1]);
+        dump_start = progaddr;
+
+        for (int i = 2; i < argc; ++i) {
             const std::string arg = argv[i];
 
-            if (arg == "--load-address") {
-                if (i + 1 >= argc) {
-                    throw std::runtime_error("--load-address is missing a value");
-                }
-                load_address = parse_cli_u32(argv[++i], "--load-address");
-            } else if (arg == "--dump-start") {
+            if (arg == "--dump-start") {
                 if (i + 1 >= argc) {
                     throw std::runtime_error("--dump-start is missing a value");
                 }
@@ -69,6 +120,7 @@ int main(int argc, char* argv[]) {
                     throw std::runtime_error("--report is missing a value");
                 }
                 report_path = argv[++i];
+                report_overridden = true;
             } else if (!arg.empty() && arg[0] == '-') {
                 throw std::runtime_error("Unknown option: " + arg);
             } else {
@@ -77,36 +129,30 @@ int main(int argc, char* argv[]) {
         }
 
         if (object_files.empty()) {
-            print_usage(argv[0]);
-            return 1;
+            throw std::runtime_error("At least one object file is required");
         }
 
         LinkingLoader loader;
-        const auto entry = loader.linking_load(object_files, load_address);
+        const std::uint32_t entry = loader.linking_load(progaddr, object_files);
 
-        std::ofstream report(report_path, std::ios::out | std::ios::trunc);
-        if (!report) {
-            throw std::runtime_error("Cannot write report file: " + report_path);
+        std::uint32_t effective_dump_length = dump_length;
+        if (effective_dump_length == 0) {
+            effective_dump_length = loader.memory_space_bytes();
         }
 
-        report << "=== Linking Summary ===\n";
-        report << "Object count: " << object_files.size() << '\n';
-        report << "Load base   : 0x" << std::uppercase << std::hex << std::setfill('0') << std::setw(4)
-               << load_address << '\n';
-        report << "Entry point : 0x" << std::uppercase << std::hex << std::setfill('0') << std::setw(4)
-               << entry << "\n\n";
+        if (report_overridden) {
+            write_report_file(loader, dump_start, effective_dump_length, report_path);
+            std::cout << "Linking completed. PROGADDR=0x"
+                      << std::uppercase << std::hex << std::setfill('0') << std::setw(4) << progaddr
+                      << ", ENTRY=0x" << std::setw(4) << entry
+                      << ". Report written to: " << report_path << '\n';
+            return 0;
+        }
 
-        loader.display_symbol_table(report);
-
-        report << "Memory Window\n";
-        report << "-------------\n";
-        report << "Start : 0x" << std::uppercase << std::hex << std::setfill('0') << std::setw(4)
-               << dump_start << '\n';
-        report << "Length: " << std::dec << dump_length << " bytes\n\n";
-        loader.display_memory(report, dump_start, dump_length);
-
-        std::cout << "Linking completed. Entry=0x"
-                  << std::uppercase << std::hex << std::setfill('0') << std::setw(4) << entry
+        write_report_file(loader, dump_start, effective_dump_length, report_path);
+        std::cout << "Linking completed. PROGADDR=0x"
+                  << std::uppercase << std::hex << std::setfill('0') << std::setw(4) << progaddr
+                  << ", ENTRY=0x" << std::setw(4) << entry
                   << ". Report written to: " << report_path << '\n';
     } catch (const std::exception& e) {
         std::cerr << "Execution failed: " << e.what() << '\n';

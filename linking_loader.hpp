@@ -1,78 +1,37 @@
-#pragma once
+#ifndef LINKING_LOADER_HPP
+#define LINKING_LOADER_HPP
 
-#include <cstddef>
+#include "passers.hpp"
+
 #include <cstdint>
 #include <iosfwd>
+#include <memory>
 #include <string>
-#include <tuple>
 #include <unordered_map>
 #include <vector>
 
 class LinkingLoader {
 private:
-    // Properties
-    struct TextRecord {
-        std::uint32_t addr;
-        std::string data_hex;
-    };
+    std::shared_ptr<const IPasser1> passer1_;
+    std::shared_ptr<const IPasser2> passer2_;
 
-    struct ModificationRecord {
-        std::uint32_t addr;
-        std::uint32_t length;
-        char op;
-        std::string symbol;
-    };
-
-    struct ObjectFileData {
-        std::string name;
-        std::uint32_t start = 0;
-        std::uint32_t length = 0;
-        std::vector<TextRecord> program;
-        std::vector<ModificationRecord> modifications;
-        bool has_entry = false;
-        std::uint32_t entry_point = 0;
-    };
-
-    std::vector<std::uint8_t> memory_;
-    std::unordered_map<std::string, std::uint32_t> symtab_;
-    std::vector<std::string> symbol_order_;
-    std::vector<ModificationRecord> reloc_info_;
-    std::uint32_t prog_start_ = 0;
-    std::uint32_t prog_length_ = 0;
-    std::uint32_t entry_point_ = 0;
+    std::uint32_t progaddr_ = 0;
+    std::uint32_t memory_space_bytes_ = 0;
+    std::unordered_map<std::string, std::uint32_t> estab_;
+    std::vector<std::string> estab_order_;
+    std::vector<char> memory_hex_;
 
 public:
-    // Constructor
-    explicit LinkingLoader(std::size_t mem_size = 0x10000);
+    explicit LinkingLoader(std::shared_ptr<const IPasser1> passer1 = std::make_shared<Passer1>(),
+                           std::shared_ptr<const IPasser2> passer2 = std::make_shared<Passer2>());
 
-private:
-    // Helper functions
-    std::tuple<std::string, std::uint32_t, std::uint32_t> parse_header(const std::string& line) const;
-    TextRecord parse_text(const std::string& line) const;
-    ModificationRecord parse_modification(const std::string& line) const;
-    std::tuple<bool, std::uint32_t> parse_end(const std::string& line) const;
+    std::uint32_t linking_load(std::uint32_t progaddr, const std::vector<std::string>& object_files);
 
-    ObjectFileData read_object_file(const std::string& filename) const;
-    void load_program(const std::vector<TextRecord>& program,
-                      std::uint32_t load_base,
-                      std::uint32_t start_addr);
-    void apply_relocations(std::uint32_t base_addr);
+    std::uint32_t progaddr() const;
+    std::uint32_t memory_space_bytes() const;
 
-    static std::uint32_t parse_hex_u32(const std::string& text, const char* field_name);
-    static std::uint8_t parse_hex_byte(const std::string& text, const char* field_name);
-    static std::int64_t read_signed_be(const std::vector<std::uint8_t>& memory,
-                                       std::uint32_t addr,
-                                       std::uint32_t length);
-    static void write_signed_be(std::vector<std::uint8_t>& memory,
-                                std::uint32_t addr,
-                                std::uint32_t length,
-                                std::int64_t value);
-
-public:
-    // Methods
-    void reset();
-    std::uint32_t linking_load(const std::vector<std::string>& object_files,
-                               std::uint32_t load_address = 0x1000);
-    void display_memory(std::ostream& out, std::uint32_t start_addr, std::uint32_t length) const;
-    void display_symbol_table(std::ostream& out) const;
+    void write_estab(std::ostream& out) const;
+    void write_memory_dump(std::ostream& out, std::uint32_t start_addr, std::uint32_t length_bytes) const;
 };
+
+#endif  // LINKING_LOADER_HPP
