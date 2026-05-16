@@ -1,0 +1,9 @@
+# cmake build output
+/build/
+/cmake-build-*/
+
+# cmake-generated files in source dir (if ever generated there)
+CMakeCache.txt
+CMakeFiles/
+cmake_install.cmake
+Makefile
